@@ -1,0 +1,48 @@
+public class SmoothWarmingUpLimiter {
+    private final int maxPermits;
+    private final long warmupPeriodMicros;
+    private final TimeUnit timeUnit;
+    private double slope;
+    private double threshold;
+    private long nextFreeTicketMicros = 0L;
+    private double storedPermits = 0.0;
+    private long nextFreeTicketMicros = 0L;
+
+    public SmoothWarmingUpLimiter(int maxPermits, long warmupPeriod, TimeUnit timeUnit) {
+        this.maxPermits = maxPermits;
+        this.warmupPeriodMicros = timeUnit.toMicros(warmupPeriod);
+        this.timeUnit = timeUnit;
+    }
+
+    public synchronized void acquire() throws InterruptedException {
+        while (true) {
+            long nowMicros = System.nanoTime() / 1000;
+            if (nextFreeTicketMicros <= nowMicros) {
+                double newPermits = (nowMicros - nextFreeTicketMicros + storedPermits) / slope;
+                storedPermits = Math.min(maxPermits, newPermits);
+                nextFreeTicketMicros = nowMicros + (long) (newPermits * slope);
+                break;
+            }
+            TimeUnit.MICROSECONDS.sleep(nextFreeTicketMicros - nowMicros);
+        }
+    }
+
+    public synchronized boolean tryAcquire() {
+        long nowMicros = System.nanoTime() / 1000;
+        if (nextFreeTicketMicros <= nowMicros) {
+            double newPermits = (nowMicros - nextFreeTicketMicros + storedPermits) / slope;
+            storedPermits = Math.min(maxPermits, newPermits);
+            nextFreeTicketMicros = nowMicros + (long) (newPermits * slope);
+            return true;
+        }
+        return false;
+    }
+
+    private void resync(long nowMicros) {
+        if (nowMicros > nextFreeTicketMicros) {
+            double newPermits = (nowMicros - nextFreeTicketMicros) / warmupPeriodMicros;
+            storedPermits = Math.min(maxPermits, storedPermits + newPermits);
+            nextFreeTicketMicros = nowMicros;
+        }
+    }
+}
